@@ -1,3 +1,7 @@
+*** New Mazacoin Android Wallet - refork ***
+This is not yet usable code! this is a new fork from original source, and mazacoin changes from current beta wallet are being applied - DO NOT USE on LIVENET!!!!! This message will be removed when this is functional code
+
+
 Welcome to _Bitcoin Wallet_, a standalone Bitcoin payment app for your Android device!
 
 This project contains several sub-projects:

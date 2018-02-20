@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2014 the original author or authors.
+ * Copyright 2011-2015 the original author or authors.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,76 +17,69 @@
 
 package de.schildbach.wallet.util;
 
-import javax.annotation.Nonnull;
+import de.schildbach.wallet_test.R;
 
 import android.app.Activity;
 import android.app.Dialog;
+import android.app.DialogFragment;
+import android.app.FragmentManager;
 import android.graphics.Bitmap;
+import android.graphics.drawable.BitmapDrawable;
 import android.os.Bundle;
-import android.support.v4.app.DialogFragment;
-import android.support.v4.app.FragmentManager;
 import android.view.View;
 import android.view.Window;
 import android.widget.ImageView;
-import de.schildbach.wallet_test.R;
 
 /**
  * @author Andreas Schildbach
  */
-public class BitmapFragment extends DialogFragment
-{
-	private static final String FRAGMENT_TAG = BitmapFragment.class.getName();
+public class BitmapFragment extends DialogFragment {
+    private static final String FRAGMENT_TAG = BitmapFragment.class.getName();
+    private static final String KEY_BITMAP = "bitmap";
 
-	private static final String KEY_BITMAP = "bitmap";
+    public static void show(final FragmentManager fm, final Bitmap bitmap) {
+        instance(bitmap).show(fm, FRAGMENT_TAG);
+    }
 
-	public static void show(final FragmentManager fm, @Nonnull final Bitmap bitmap)
-	{
-		final DialogFragment newFragment = instance(bitmap);
-		newFragment.show(fm, FRAGMENT_TAG);
-	}
+    private static BitmapFragment instance(final Bitmap bitmap) {
+        final BitmapFragment fragment = new BitmapFragment();
 
-	private static BitmapFragment instance(@Nonnull final Bitmap bitmap)
-	{
-		final BitmapFragment fragment = new BitmapFragment();
+        final Bundle args = new Bundle();
+        args.putParcelable(KEY_BITMAP, bitmap);
+        fragment.setArguments(args);
 
-		final Bundle args = new Bundle();
-		args.putParcelable(KEY_BITMAP, bitmap);
-		fragment.setArguments(args);
+        return fragment;
+    }
 
-		return fragment;
-	}
+    private Activity activity;
 
-	private Activity activity;
+    @Override
+    public void onAttach(final Activity activity) {
+        super.onAttach(activity);
 
-	@Override
-	public void onAttach(final Activity activity)
-	{
-		super.onAttach(activity);
+        this.activity = activity;
+    }
 
-		this.activity = activity;
-	}
+    @Override
+    public Dialog onCreateDialog(final Bundle savedInstanceState) {
+        final Bundle args = getArguments();
+        final BitmapDrawable bitmap = new BitmapDrawable(getResources(), (Bitmap) args.getParcelable(KEY_BITMAP));
+        bitmap.setFilterBitmap(false);
 
-	@Override
-	public Dialog onCreateDialog(final Bundle savedInstanceState)
-	{
-		final Bitmap bitmap = (Bitmap) getArguments().getParcelable(KEY_BITMAP);
+        final Dialog dialog = new Dialog(activity);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+        dialog.setContentView(R.layout.bitmap_dialog);
+        dialog.setCanceledOnTouchOutside(true);
 
-		final Dialog dialog = new Dialog(activity);
-		dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
-		dialog.setContentView(R.layout.bitmap_dialog);
-		dialog.setCanceledOnTouchOutside(true);
+        final ImageView imageView = (ImageView) dialog.findViewById(R.id.bitmap_dialog_image);
+        imageView.setImageDrawable(bitmap);
+        imageView.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(final View v) {
+                dismiss();
+            }
+        });
 
-		final ImageView imageView = (ImageView) dialog.findViewById(R.id.bitmap_dialog_image);
-		imageView.setImageBitmap(bitmap);
-		imageView.setOnClickListener(new View.OnClickListener()
-		{
-			@Override
-			public void onClick(final View v)
-			{
-				dismiss();
-			}
-		});
-
-		return dialog;
-	}
+        return dialog;
+    }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2014 the original author or authors.
+ * Copyright 2012-2015 the original author or authors.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,334 +18,359 @@
 package de.schildbach.wallet.ui;
 
 import java.net.InetAddress;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.RejectedExecutionException;
 
-import javax.annotation.Nonnull;
-
+import org.bitcoinj.core.Peer;
+import org.bitcoinj.core.VersionMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import de.schildbach.wallet.service.BlockchainService;
+import de.schildbach.wallet.service.BlockchainServiceImpl;
+import de.schildbach.wallet_test.R;
+
 import android.app.Activity;
+import android.app.Fragment;
+import android.app.LoaderManager;
+import android.app.LoaderManager.LoaderCallbacks;
+import android.content.AsyncTaskLoader;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.Loader;
 import android.content.ServiceConnection;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
-import android.support.v4.app.LoaderManager;
-import android.support.v4.app.LoaderManager.LoaderCallbacks;
-import android.support.v4.content.AsyncTaskLoader;
-import android.support.v4.content.Loader;
 import android.support.v4.content.LocalBroadcastManager;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
 import android.text.format.DateUtils;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
-import android.widget.ArrayAdapter;
 import android.widget.TextView;
-
-import com.actionbarsherlock.app.SherlockListFragment;
-import com.google.bitcoin.core.Peer;
-import com.google.bitcoin.core.VersionMessage;
-
-import de.schildbach.wallet.service.BlockchainService;
-import de.schildbach.wallet.service.BlockchainServiceImpl;
-import de.schildbach.wallet.util.WholeStringBuilder;
-import de.schildbach.wallet_test.R;
+import android.widget.ViewAnimator;
 
 /**
  * @author Andreas Schildbach
  */
-public final class PeerListFragment extends SherlockListFragment
-{
-	private AbstractWalletActivity activity;
-	private LoaderManager loaderManager;
+public final class PeerListFragment extends Fragment {
+    private AbstractWalletActivity activity;
+    private LoaderManager loaderManager;
 
-	private BlockchainService service;
-	private ArrayAdapter<Peer> adapter;
+    private BlockchainService service;
 
-	private final Handler handler = new Handler();
+    private ViewAnimator viewGroup;
+    private RecyclerView recyclerView;
+    private PeerViewAdapter adapter;
 
-	private static final long REFRESH_MS = DateUtils.SECOND_IN_MILLIS;
+    private final Handler handler = new Handler();
 
-	private static final int ID_PEER_LOADER = 0;
-	private static final int ID_REVERSE_DNS_LOADER = 1;
+    private static final long REFRESH_MS = DateUtils.SECOND_IN_MILLIS;
 
-	private final Map<InetAddress, String> hostnames = new WeakHashMap<InetAddress, String>();
+    private static final int ID_PEER_LOADER = 0;
+    private static final int ID_REVERSE_DNS_LOADER = 1;
 
-	private static final Logger log = LoggerFactory.getLogger(PeerListFragment.class);
+    private final Map<InetAddress, String> hostnames = new WeakHashMap<InetAddress, String>();
 
-	@Override
-	public void onAttach(final Activity activity)
-	{
-		super.onAttach(activity);
+    private static final Logger log = LoggerFactory.getLogger(PeerListFragment.class);
 
-		this.activity = (AbstractWalletActivity) activity;
-		this.loaderManager = getLoaderManager();
-	}
+    @Override
+    public void onAttach(final Activity activity) {
+        super.onAttach(activity);
 
-	@Override
-	public void onActivityCreated(final Bundle savedInstanceState)
-	{
-		super.onActivityCreated(savedInstanceState);
+        this.activity = (AbstractWalletActivity) activity;
+        this.loaderManager = getLoaderManager();
+    }
 
-		activity.bindService(new Intent(activity, BlockchainServiceImpl.class), serviceConnection, Context.BIND_AUTO_CREATE);
-	}
+    @Override
+    public void onActivityCreated(final Bundle savedInstanceState) {
+        super.onActivityCreated(savedInstanceState);
 
-	@Override
-	public void onCreate(final Bundle savedInstanceState)
-	{
-		super.onCreate(savedInstanceState);
+        activity.bindService(new Intent(activity, BlockchainServiceImpl.class), serviceConnection,
+                Context.BIND_AUTO_CREATE);
+    }
 
-		adapter = new ArrayAdapter<Peer>(activity, 0)
-		{
-			@Override
-			public View getView(final int position, View row, final ViewGroup parent)
-			{
-				if (row == null)
-					row = getLayoutInflater(null).inflate(R.layout.peer_list_row, null);
+    @Override
+    public void onCreate(final Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
 
-				final Peer peer = getItem(position);
-				final VersionMessage versionMessage = peer.getPeerVersionMessage();
-				final boolean isDownloading = peer.getDownloadData();
+        adapter = new PeerViewAdapter();
+    }
 
-				final TextView rowIp = (TextView) row.findViewById(R.id.peer_list_row_ip);
-				final InetAddress address = peer.getAddress().getAddr();
-				final String hostname = hostnames.get(address);
-				rowIp.setText(hostname != null ? hostname : address.getHostAddress());
+    @Override
+    public View onCreateView(final LayoutInflater inflater, final ViewGroup container,
+            final Bundle savedInstanceState) {
+        final View view = inflater.inflate(R.layout.peer_list_fragment, container, false);
 
-				final TextView rowHeight = (TextView) row.findViewById(R.id.peer_list_row_height);
-				final long bestHeight = peer.getBestHeight();
-				rowHeight.setText(bestHeight > 0 ? bestHeight + " blocks" : null);
-				rowHeight.setTypeface(isDownloading ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        viewGroup = (ViewAnimator) view.findViewById(R.id.peer_list_group);
 
-				final TextView rowVersion = (TextView) row.findViewById(R.id.peer_list_row_version);
-				rowVersion.setText(versionMessage.subVer);
-				rowVersion.setTypeface(isDownloading ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        recyclerView = (RecyclerView) view.findViewById(R.id.peer_list);
+        recyclerView.setLayoutManager(new LinearLayoutManager(activity));
+        recyclerView.setAdapter(adapter);
+        recyclerView.addItemDecoration(new DividerItemDecoration(getActivity(), DividerItemDecoration.VERTICAL_LIST));
 
-				final TextView rowProtocol = (TextView) row.findViewById(R.id.peer_list_row_protocol);
-				rowProtocol.setText("protocol: " + versionMessage.clientVersion);
-				rowProtocol.setTypeface(isDownloading ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        return view;
+    }
 
-				final TextView rowPing = (TextView) row.findViewById(R.id.peer_list_row_ping);
-				final long pingTime = peer.getPingTime();
-				rowPing.setText(pingTime < Long.MAX_VALUE ? getString(R.string.peer_list_row_ping_time, pingTime) : null);
-				rowPing.setTypeface(isDownloading ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+    @Override
+    public void onResume() {
+        super.onResume();
 
-				return row;
-			}
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                adapter.notifyDataSetChanged();
 
-			@Override
-			public boolean isEnabled(final int position)
-			{
-				return false;
-			}
-		};
-		setListAdapter(adapter);
-	}
+                final Loader<String> loader = loaderManager.getLoader(ID_REVERSE_DNS_LOADER);
+                final boolean loaderRunning = loader != null && loader.isStarted();
 
-	@Override
-	public void onResume()
-	{
-		super.onResume();
+                if (!loaderRunning) {
+                    for (int i = 0; i < adapter.getItemCount(); i++) {
+                        final Peer peer = adapter.getItem(i);
+                        final InetAddress address = peer.getAddress().getAddr();
 
-		handler.postDelayed(new Runnable()
-		{
-			@Override
-			public void run()
-			{
-				adapter.notifyDataSetChanged();
+                        if (!hostnames.containsKey(address)) {
+                            final Bundle args = new Bundle();
+                            args.putSerializable("address", address);
+                            loaderManager.initLoader(ID_REVERSE_DNS_LOADER, args, reverseDnsLoaderCallbacks)
+                                    .forceLoad();
 
-				final Loader<String> loader = loaderManager.getLoader(ID_REVERSE_DNS_LOADER);
-				final boolean loaderRunning = loader != null && loader.isStarted();
+                            break;
+                        }
+                    }
+                }
 
-				if (!loaderRunning)
-				{
-					for (int i = 0; i < adapter.getCount(); i++)
-					{
-						final Peer peer = adapter.getItem(i);
-						final InetAddress address = peer.getAddress().getAddr();
+                handler.postDelayed(this, REFRESH_MS);
+            }
+        }, REFRESH_MS);
+    }
 
-						if (!hostnames.containsKey(address))
-						{
-							final Bundle args = new Bundle();
-							args.putSerializable("address", address);
-							loaderManager.initLoader(ID_REVERSE_DNS_LOADER, args, reverseDnsLoaderCallbacks).forceLoad();
+    @Override
+    public void onPause() {
+        handler.removeCallbacksAndMessages(null);
 
-							break;
-						}
-					}
-				}
+        super.onPause();
+    }
 
-				handler.postDelayed(this, REFRESH_MS);
-			}
-		}, REFRESH_MS);
-	}
+    @Override
+    public void onDestroy() {
+        activity.unbindService(serviceConnection);
 
-	@Override
-	public void onPause()
-	{
-		handler.removeCallbacksAndMessages(null);
+        loaderManager.destroyLoader(ID_REVERSE_DNS_LOADER);
 
-		super.onPause();
-	}
+        super.onDestroy();
+    }
 
-	@Override
-	public void onDestroy()
-	{
-		activity.unbindService(serviceConnection);
+    private final ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(final ComponentName name, final IBinder binder) {
+            service = ((BlockchainServiceImpl.LocalBinder) binder).getService();
 
-		loaderManager.destroyLoader(ID_REVERSE_DNS_LOADER);
+            loaderManager.initLoader(ID_PEER_LOADER, null, peerLoaderCallbacks);
+        }
 
-		super.onDestroy();
-	}
+        @Override
+        public void onServiceDisconnected(final ComponentName name) {
+            loaderManager.destroyLoader(ID_PEER_LOADER);
 
-	private final ServiceConnection serviceConnection = new ServiceConnection()
-	{
-		@Override
-		public void onServiceConnected(final ComponentName name, final IBinder binder)
-		{
-			service = ((BlockchainServiceImpl.LocalBinder) binder).getService();
+            service = null;
+        }
+    };
 
-			loaderManager.initLoader(ID_PEER_LOADER, null, peerLoaderCallbacks);
-		}
+    private class PeerViewAdapter extends RecyclerView.Adapter<PeerViewHolder> {
+        private final LayoutInflater inflater = LayoutInflater.from(activity);
+        private final List<Peer> peers = new LinkedList<Peer>();
 
-		@Override
-		public void onServiceDisconnected(final ComponentName name)
-		{
-			loaderManager.destroyLoader(ID_PEER_LOADER);
+        public PeerViewAdapter() {
+            setHasStableIds(true);
+        }
 
-			service = null;
-		}
-	};
+        public void clear() {
+            peers.clear();
 
-	private static class PeerLoader extends AsyncTaskLoader<List<Peer>>
-	{
-		private LocalBroadcastManager broadcastManager;
-		private BlockchainService service;
+            notifyDataSetChanged();
+        }
 
-		private PeerLoader(final Context context, @Nonnull final BlockchainService service)
-		{
-			super(context);
+        public void replace(final List<Peer> peers) {
+            this.peers.clear();
+            this.peers.addAll(peers);
 
-			this.broadcastManager = LocalBroadcastManager.getInstance(context.getApplicationContext());
-			this.service = service;
-		}
+            notifyDataSetChanged();
+        }
 
-		@Override
-		protected void onStartLoading()
-		{
-			super.onStartLoading();
+        public Peer getItem(final int position) {
+            return peers.get(position);
+        }
 
-			broadcastManager.registerReceiver(broadcastReceiver, new IntentFilter(BlockchainService.ACTION_PEER_STATE));
+        @Override
+        public int getItemCount() {
+            return peers.size();
+        }
 
-			forceLoad();
-		}
+        @Override
+        public long getItemId(final int position) {
+            return peers.get(position).getAddress().hashCode();
+        }
 
-		@Override
-		protected void onStopLoading()
-		{
-			broadcastManager.unregisterReceiver(broadcastReceiver);
+        @Override
+        public PeerViewHolder onCreateViewHolder(final ViewGroup parent, final int viewType) {
+            return new PeerViewHolder(inflater.inflate(R.layout.peer_list_row, parent, false));
+        }
 
-			super.onStopLoading();
-		}
+        @Override
+        public void onBindViewHolder(final PeerViewHolder holder, final int position) {
+            final Peer peer = getItem(position);
+            final VersionMessage versionMessage = peer.getPeerVersionMessage();
+            final boolean isDownloading = peer.isDownloadData();
 
-		@Override
-		public List<Peer> loadInBackground()
-		{
-			return service.getConnectedPeers();
-		}
+            final InetAddress address = peer.getAddress().getAddr();
+            final String hostname = hostnames.get(address);
+            holder.ipView.setText(hostname != null ? hostname : address.getHostAddress());
 
-		private final BroadcastReceiver broadcastReceiver = new BroadcastReceiver()
-		{
-			@Override
-			public void onReceive(final Context context, final Intent intent)
-			{
-				try
-				{
-					forceLoad();
-				}
-				catch (final RejectedExecutionException x)
-				{
-					log.info("rejected execution: " + PeerLoader.this.toString());
-				}
-			}
-		};
-	}
+            final long bestHeight = peer.getBestHeight();
+            holder.heightView.setText(bestHeight > 0 ? bestHeight + " blocks" : null);
+            holder.heightView.setTypeface(isDownloading ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
 
-	private final LoaderCallbacks<List<Peer>> peerLoaderCallbacks = new LoaderCallbacks<List<Peer>>()
-	{
-		@Override
-		public Loader<List<Peer>> onCreateLoader(final int id, final Bundle args)
-		{
-			return new PeerLoader(activity, service);
-		}
+            holder.versionView.setText(versionMessage.subVer);
+            holder.versionView.setTypeface(isDownloading ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
 
-		@Override
-		public void onLoadFinished(final Loader<List<Peer>> loader, final List<Peer> peers)
-		{
-			adapter.clear();
+            holder.protocolView.setText("protocol: " + versionMessage.clientVersion);
+            holder.protocolView.setTypeface(isDownloading ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
 
-			if (peers != null)
-				for (final Peer peer : peers)
-					adapter.add(peer);
+            final long pingTime = peer.getPingTime();
+            holder.pingView
+                    .setText(pingTime < Long.MAX_VALUE ? getString(R.string.peer_list_row_ping_time, pingTime) : null);
+            holder.pingView.setTypeface(isDownloading ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+        }
+    }
 
-			setEmptyText(WholeStringBuilder.bold(getString(R.string.peer_list_fragment_empty)));
-		}
+    private static class PeerViewHolder extends RecyclerView.ViewHolder {
+        private final TextView ipView;
+        private final TextView heightView;
+        private final TextView versionView;
+        private final TextView protocolView;
+        private final TextView pingView;
 
-		@Override
-		public void onLoaderReset(final Loader<List<Peer>> loader)
-		{
-			adapter.clear();
-		}
-	};
+        private PeerViewHolder(final View itemView) {
+            super(itemView);
 
-	private static class ReverseDnsLoader extends AsyncTaskLoader<String>
-	{
-		public final InetAddress address;
+            ipView = (TextView) itemView.findViewById(R.id.peer_list_row_ip);
+            heightView = (TextView) itemView.findViewById(R.id.peer_list_row_height);
+            versionView = (TextView) itemView.findViewById(R.id.peer_list_row_version);
+            protocolView = (TextView) itemView.findViewById(R.id.peer_list_row_protocol);
+            pingView = (TextView) itemView.findViewById(R.id.peer_list_row_ping);
+        }
+    }
 
-		public ReverseDnsLoader(final Context context, @Nonnull final InetAddress address)
-		{
-			super(context);
+    private static class PeerLoader extends AsyncTaskLoader<List<Peer>> {
+        private LocalBroadcastManager broadcastManager;
+        private BlockchainService service;
 
-			this.address = address;
-		}
+        private PeerLoader(final Context context, final BlockchainService service) {
+            super(context);
 
-		@Override
-		public String loadInBackground()
-		{
-			return address.getCanonicalHostName();
-		}
-	}
+            this.broadcastManager = LocalBroadcastManager.getInstance(context.getApplicationContext());
+            this.service = service;
+        }
 
-	private final LoaderCallbacks<String> reverseDnsLoaderCallbacks = new LoaderCallbacks<String>()
-	{
-		@Override
-		public Loader<String> onCreateLoader(final int id, final Bundle args)
-		{
-			final InetAddress address = (InetAddress) args.getSerializable("address");
+        @Override
+        protected void onStartLoading() {
+            super.onStartLoading();
 
-			return new ReverseDnsLoader(activity, address);
-		}
+            broadcastManager.registerReceiver(broadcastReceiver, new IntentFilter(BlockchainService.ACTION_PEER_STATE));
 
-		@Override
-		public void onLoadFinished(final Loader<String> loader, final String hostname)
-		{
-			final InetAddress address = ((ReverseDnsLoader) loader).address;
-			hostnames.put(address, hostname);
+            forceLoad();
+        }
 
-			loaderManager.destroyLoader(ID_REVERSE_DNS_LOADER);
-		}
+        @Override
+        protected void onStopLoading() {
+            broadcastManager.unregisterReceiver(broadcastReceiver);
 
-		@Override
-		public void onLoaderReset(final Loader<String> loader)
-		{
-		}
-	};
+            super.onStopLoading();
+        }
+
+        @Override
+        public List<Peer> loadInBackground() {
+            return service.getConnectedPeers();
+        }
+
+        private final BroadcastReceiver broadcastReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(final Context context, final Intent intent) {
+                try {
+                    forceLoad();
+                } catch (final RejectedExecutionException x) {
+                    log.info("rejected execution: " + PeerLoader.this.toString());
+                }
+            }
+        };
+    }
+
+    private final LoaderCallbacks<List<Peer>> peerLoaderCallbacks = new LoaderCallbacks<List<Peer>>() {
+        @Override
+        public Loader<List<Peer>> onCreateLoader(final int id, final Bundle args) {
+            return new PeerLoader(activity, service);
+        }
+
+        @Override
+        public void onLoadFinished(final Loader<List<Peer>> loader, final List<Peer> peers) {
+            if (peers == null || peers.isEmpty()) {
+                viewGroup.setDisplayedChild(1);
+                adapter.clear();
+            } else {
+                viewGroup.setDisplayedChild(2);
+                adapter.replace(peers);
+            }
+        }
+
+        @Override
+        public void onLoaderReset(final Loader<List<Peer>> loader) {
+            adapter.clear();
+        }
+    };
+
+    private static class ReverseDnsLoader extends AsyncTaskLoader<String> {
+        public final InetAddress address;
+
+        public ReverseDnsLoader(final Context context, final InetAddress address) {
+            super(context);
+
+            this.address = address;
+        }
+
+        @Override
+        public String loadInBackground() {
+            return address.getCanonicalHostName();
+        }
+    }
+
+    private final LoaderCallbacks<String> reverseDnsLoaderCallbacks = new LoaderCallbacks<String>() {
+        @Override
+        public Loader<String> onCreateLoader(final int id, final Bundle args) {
+            final InetAddress address = (InetAddress) args.getSerializable("address");
+
+            return new ReverseDnsLoader(activity, address);
+        }
+
+        @Override
+        public void onLoadFinished(final Loader<String> loader, final String hostname) {
+            final InetAddress address = ((ReverseDnsLoader) loader).address;
+            hostnames.put(address, hostname);
+
+            loaderManager.destroyLoader(ID_REVERSE_DNS_LOADER);
+        }
+
+        @Override
+        public void onLoaderReset(final Loader<String> loader) {
+        }
+    };
 }

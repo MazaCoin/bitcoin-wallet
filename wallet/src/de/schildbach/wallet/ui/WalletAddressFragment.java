@@ -1,5 +1,5 @@
 /*
- * Copyright 2011-2014 the original author or authors.
+ * Copyright 2011-2015 the original author or authors.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -17,145 +17,262 @@
 
 package de.schildbach.wallet.ui;
 
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
+
+import javax.annotation.Nullable;
+
+import org.bitcoinj.core.Address;
+import org.bitcoinj.uri.BitcoinURI;
+import org.bitcoinj.utils.Threading;
+import org.bitcoinj.wallet.Wallet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import de.schildbach.wallet.Configuration;
+import de.schildbach.wallet.Constants;
+import de.schildbach.wallet.WalletApplication;
+import de.schildbach.wallet.util.Qr;
+import de.schildbach.wallet.util.ThrottlingWalletChangeListener;
+import de.schildbach.wallet_test.R;
+
 import android.app.Activity;
+import android.app.Fragment;
+import android.app.LoaderManager;
+import android.app.LoaderManager.LoaderCallbacks;
+import android.content.AsyncTaskLoader;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.Loader;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
-import android.graphics.Bitmap;
-import android.nfc.NfcManager;
+import android.graphics.Color;
+import android.graphics.drawable.BitmapDrawable;
+import android.nfc.NdefMessage;
+import android.nfc.NdefRecord;
+import android.nfc.NfcAdapter;
+import android.nfc.NfcEvent;
 import android.os.Bundle;
-import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentActivity;
+import android.support.v4.content.LocalBroadcastManager;
+import android.support.v7.widget.CardView;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
 import android.view.ViewGroup;
 import android.widget.ImageView;
-import android.widget.TextView;
-
-import com.google.bitcoin.core.Address;
-import com.google.bitcoin.uri.BitcoinURI;
-
-import de.schildbach.wallet.Configuration;
-import de.schildbach.wallet.Constants;
-import de.schildbach.wallet.WalletApplication;
-import de.schildbach.wallet.util.BitmapFragment;
-import de.schildbach.wallet.util.Nfc;
-import de.schildbach.wallet.util.Qr;
-import de.schildbach.wallet.util.WalletUtils;
-import de.schildbach.wallet_test.R;
 
 /**
  * @author Andreas Schildbach
  */
-public final class WalletAddressFragment extends Fragment
-{
-	private FragmentActivity activity;
-	private WalletApplication application;
-	private Configuration config;
-	private NfcManager nfcManager;
+public final class WalletAddressFragment extends Fragment implements NfcAdapter.CreateNdefMessageCallback {
+    private Activity activity;
+    private WalletApplication application;
+    private Configuration config;
+    private LoaderManager loaderManager;
+    @Nullable
+    private NfcAdapter nfcAdapter;
 
-	private View bitcoinAddressButton;
-	private TextView bitcoinAddressLabel;
-	private ImageView bitcoinAddressQrView;
+    private ImageView currentAddressQrView;
 
-	private Address lastSelectedAddress;
+    private BitmapDrawable currentAddressQrBitmap = null;
+    private AddressAndLabel currentAddressQrAddress = null;
+    private final AtomicReference<String> currentAddressUriRef = new AtomicReference<String>();
 
-	private Bitmap qrCodeBitmap;
+    private static final int ID_ADDRESS_LOADER = 0;
 
-	@Override
-	public void onAttach(final Activity activity)
-	{
-		super.onAttach(activity);
+    private static final Logger log = LoggerFactory.getLogger(WalletAddressFragment.class);
 
-		this.activity = (FragmentActivity) activity;
-		this.application = (WalletApplication) activity.getApplication();
-		this.config = application.getConfiguration();
-		this.nfcManager = (NfcManager) activity.getSystemService(Context.NFC_SERVICE);
-	}
+    @Override
+    public void onAttach(final Activity activity) {
+        super.onAttach(activity);
 
-	@Override
-	public View onCreateView(final LayoutInflater inflater, final ViewGroup container, final Bundle savedInstanceState)
-	{
-		final View view = inflater.inflate(R.layout.wallet_address_fragment, container, false);
-		bitcoinAddressButton = view.findViewById(R.id.bitcoin_address_button);
-		bitcoinAddressLabel = (TextView) view.findViewById(R.id.bitcoin_address_label);
-		bitcoinAddressQrView = (ImageView) view.findViewById(R.id.bitcoin_address_qr);
+        this.activity = activity;
+        this.application = (WalletApplication) activity.getApplication();
+        this.config = application.getConfiguration();
+        this.loaderManager = getLoaderManager();
+        this.nfcAdapter = NfcAdapter.getDefaultAdapter(activity);
+    }
 
-		bitcoinAddressButton.setOnClickListener(new OnClickListener()
-		{
-			@Override
-			public void onClick(final View v)
-			{
-				AddressBookActivity.start(activity, false);
-			}
-		});
+    @Override
+    public void onCreate(final Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
 
-		bitcoinAddressQrView.setOnClickListener(new OnClickListener()
-		{
-			@Override
-			public void onClick(final View v)
-			{
-				handleShowQRCode();
-			}
-		});
+        if (nfcAdapter != null && nfcAdapter.isEnabled())
+            nfcAdapter.setNdefPushMessageCallback(this, activity);
+    }
 
-		return view;
-	}
+    @Override
+    public View onCreateView(final LayoutInflater inflater, final ViewGroup container,
+            final Bundle savedInstanceState) {
+        final View view = inflater.inflate(R.layout.wallet_address_fragment, container, false);
+        currentAddressQrView = (ImageView) view.findViewById(R.id.bitcoin_address_qr);
 
-	@Override
-	public void onResume()
-	{
-		super.onResume();
+        final CardView currentAddressQrCardView = (CardView) view.findViewById(R.id.bitcoin_address_qr_card);
+        currentAddressQrCardView.setCardBackgroundColor(Color.WHITE);
+        currentAddressQrCardView.setPreventCornerOverlap(false);
+        currentAddressQrCardView.setOnClickListener(new OnClickListener() {
+            @Override
+            public void onClick(final View v) {
+                handleShowQRCode();
+            }
+        });
 
-		config.registerOnSharedPreferenceChangeListener(prefsListener);
+        return view;
+    }
 
-		updateView();
-	}
+    @Override
+    public void onResume() {
+        super.onResume();
 
-	@Override
-	public void onPause()
-	{
-		config.unregisterOnSharedPreferenceChangeListener(prefsListener);
+        loaderManager.initLoader(ID_ADDRESS_LOADER, null, addressLoaderCallbacks);
 
-		Nfc.unpublish(nfcManager, getActivity());
+        updateView();
+    }
 
-		super.onPause();
-	}
+    @Override
+    public void onPause() {
+        loaderManager.destroyLoader(ID_ADDRESS_LOADER);
 
-	private void updateView()
-	{
-		final Address selectedAddress = application.determineSelectedAddress();
+        super.onPause();
+    }
 
-		if (!selectedAddress.equals(lastSelectedAddress))
-		{
-			lastSelectedAddress = selectedAddress;
+    private void updateView() {
+        currentAddressQrView.setImageDrawable(currentAddressQrBitmap);
+    }
 
-			bitcoinAddressLabel.setText(WalletUtils.formatAddress(selectedAddress, Constants.ADDRESS_FORMAT_GROUP_SIZE,
-					Constants.ADDRESS_FORMAT_LINE_SIZE));
+    private void handleShowQRCode() {
+        WalletAddressDialogFragment.show(getFragmentManager(), currentAddressQrAddress.address,
+                currentAddressQrAddress.label);
+        log.info("Current address enlarged: {}", currentAddressQrAddress.address);
+    }
 
-			final String addressStr = BitcoinURI.convertToBitcoinURI(selectedAddress, null, null, null);
+    public static class CurrentAddressLoader extends AsyncTaskLoader<Address> {
+        private LocalBroadcastManager broadcastManager;
+        private final Wallet wallet;
+        private Configuration config;
 
-			final int size = (int) (256 * getResources().getDisplayMetrics().density);
-			qrCodeBitmap = Qr.bitmap(addressStr, size);
-			bitcoinAddressQrView.setImageBitmap(qrCodeBitmap);
+        private static final Logger log = LoggerFactory.getLogger(WalletBalanceLoader.class);
 
-			Nfc.publishUri(nfcManager, getActivity(), addressStr);
-		}
-	}
+        public CurrentAddressLoader(final Context context, final Wallet wallet, final Configuration config) {
+            super(context);
 
-	private void handleShowQRCode()
-	{
-		BitmapFragment.show(getFragmentManager(), qrCodeBitmap);
-	}
+            this.broadcastManager = LocalBroadcastManager.getInstance(context.getApplicationContext());
+            this.wallet = wallet;
+            this.config = config;
+        }
 
-	private final OnSharedPreferenceChangeListener prefsListener = new OnSharedPreferenceChangeListener()
-	{
-		@Override
-		public void onSharedPreferenceChanged(final SharedPreferences sharedPreferences, final String key)
-		{
-			if (Configuration.PREFS_KEY_SELECTED_ADDRESS.equals(key))
-				updateView();
-		}
-	};
+        @Override
+        protected void onStartLoading() {
+            super.onStartLoading();
+
+            wallet.addCoinsReceivedEventListener(Threading.SAME_THREAD, walletChangeListener);
+            wallet.addCoinsSentEventListener(Threading.SAME_THREAD, walletChangeListener);
+            wallet.addChangeEventListener(Threading.SAME_THREAD, walletChangeListener);
+            broadcastManager.registerReceiver(walletChangeReceiver,
+                    new IntentFilter(WalletApplication.ACTION_WALLET_REFERENCE_CHANGED));
+            config.registerOnSharedPreferenceChangeListener(preferenceChangeListener);
+
+            safeForceLoad();
+        }
+
+        @Override
+        protected void onStopLoading() {
+            config.unregisterOnSharedPreferenceChangeListener(preferenceChangeListener);
+            broadcastManager.unregisterReceiver(walletChangeReceiver);
+            wallet.removeChangeEventListener(walletChangeListener);
+            wallet.removeCoinsSentEventListener(walletChangeListener);
+            wallet.removeCoinsReceivedEventListener(walletChangeListener);
+            walletChangeListener.removeCallbacks();
+
+            super.onStopLoading();
+        }
+
+        @Override
+        protected void onReset() {
+            config.unregisterOnSharedPreferenceChangeListener(preferenceChangeListener);
+            broadcastManager.unregisterReceiver(walletChangeReceiver);
+            wallet.removeChangeEventListener(walletChangeListener);
+            wallet.removeCoinsSentEventListener(walletChangeListener);
+            wallet.removeCoinsReceivedEventListener(walletChangeListener);
+            walletChangeListener.removeCallbacks();
+
+            super.onReset();
+        }
+
+        @Override
+        public Address loadInBackground() {
+            org.bitcoinj.core.Context.propagate(Constants.CONTEXT);
+
+            return wallet.currentReceiveAddress();
+        }
+
+        private final ThrottlingWalletChangeListener walletChangeListener = new ThrottlingWalletChangeListener() {
+            @Override
+            public void onThrottledWalletChanged() {
+                safeForceLoad();
+            }
+        };
+
+        private final BroadcastReceiver walletChangeReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(final Context context, final Intent intent) {
+                safeForceLoad();
+            }
+        };
+
+        private final OnSharedPreferenceChangeListener preferenceChangeListener = new OnSharedPreferenceChangeListener() {
+            @Override
+            public void onSharedPreferenceChanged(final SharedPreferences sharedPreferences, final String key) {
+                if (Configuration.PREFS_KEY_OWN_NAME.equals(key))
+                    safeForceLoad();
+            }
+        };
+
+        private void safeForceLoad() {
+            try {
+                forceLoad();
+            } catch (final RejectedExecutionException x) {
+                log.info("rejected execution: " + CurrentAddressLoader.this.toString());
+            }
+        }
+    }
+
+    private final LoaderCallbacks<Address> addressLoaderCallbacks = new LoaderManager.LoaderCallbacks<Address>() {
+        @Override
+        public Loader<Address> onCreateLoader(final int id, final Bundle args) {
+            return new CurrentAddressLoader(activity, application.getWallet(), config);
+        }
+
+        @Override
+        public void onLoadFinished(final Loader<Address> loader, final Address currentAddress) {
+            if (!currentAddress.equals(currentAddressQrAddress)) {
+                currentAddressQrAddress = new AddressAndLabel(currentAddress, config.getOwnName());
+
+                final String addressStr = BitcoinURI.convertToBitcoinURI(currentAddressQrAddress.address, null,
+                        currentAddressQrAddress.label, null);
+
+                currentAddressQrBitmap = new BitmapDrawable(getResources(), Qr.bitmap(addressStr));
+                currentAddressQrBitmap.setFilterBitmap(false);
+
+                currentAddressUriRef.set(addressStr);
+
+                updateView();
+            }
+        }
+
+        @Override
+        public void onLoaderReset(final Loader<Address> loader) {
+        }
+    };
+
+    @Override
+    public NdefMessage createNdefMessage(final NfcEvent event) {
+        final String uri = currentAddressUriRef.get();
+        if (uri != null)
+            return new NdefMessage(new NdefRecord[] { NdefRecord.createUri(uri) });
+        else
+            return null;
+    }
 }

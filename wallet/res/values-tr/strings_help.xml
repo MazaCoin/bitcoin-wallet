@@ -3,27 +3,21 @@
   <string name="help_wallet">
 <![CDATA[
 		<p>
-			Ekranın üst sol köşesi diğer kişilerin size Bitcoin yollayabilmek için bilmeleri seçilen sizin Bitcoin adresinizi gösterir.
-			Adresi değiştirmek için dokunmak yeterlidir.
+			Ekranın üst kısmı Bitcoin ve seçilen milli para birimi olarak bakiyenizi gösterir.
+			Para birimleri listesine gitmek için dokununuz, ve varsayılan olarak seçmek için dövizlerden birine dokununuz
 		</p>
 		<p>
-			Sağdaki QR code Bitcoin adresinizi içerir ve diğer kişiler tarafından taranmak için kullanılabilir.
-			Daha büyük bir QR code görüntülemek için koda dokununuz.
+			Sağdaki QR kodu bitcoin adresinizi içerir ve başka birisinin taraması için kullanılabilir.
+			Daha büyük bir sürümünü elde etmek için QR koduna dokununuz.
 		</p>
 		<p>
-			Ekranın ortasında bakiyeniz görüntülenir.
-			Cüzdanınızın seçilen yerel dövizde değeri de sunulur.
-			Tüm yerel dövizlerin listesini görüntülemek için bakiyenize dokununuz, herhangi bir dövizi varsayılan olarak seçmek içinse listedeki bir dövize dokununuz.
+			Ekranın alt kısmı muamele listenizi gösterir ve başlangıçta boştur.
+			Beklemedeki muameleler teyit edilene dek gri olarak gösterilir.
+			Gönderici ve alıcıları adres defterine eklemek için herhangi bir unsura dokununuz.
 		</p>
 		<p>
-			Ekranın alt kısmı başlangıçta boş olan muamele listenizi içerir.
-			Bekleyen muameleler teyit edilene dek gri olarak görüntülenirler.
-			Herhangi bir unsura dokunarak alıcı ya da gönderici adresini adres defterine ilâve edebilirsiniz.
-			Listeye filtre uygulamak için sağa ya da sola kaydırabilirsiniz.
-		</p>
-		<p>
-			Bitcoin yollamak ya da talep etmek için etkinlik çubuğunda düğmelere dokunabilirsiniz.
-			Tercihler menüsünde daha fazla seçenek bulabilirsiniz.
+			Eylem çubuğundaki düğmelere dokunarak bitcoin talep edebilir ya da gönderebilirsiniz.
+			Seçenekler menüsünde daha fazla seçenek mevcuttur.
 		</p>
 	]]>
 	</string>
@@ -105,4 +99,21 @@
 		</p>
 	]]>
 	</string>
+  <string name="help_technical_notes">
+<![CDATA[
+        <p>
+            <b>Teknik notlar:</b>
+        </p>
+        <p>
+            Bir SPV/hafif cüzdan olarak Bitcoin Wallet As en çok ispatlanmış zinciri takip eder (ki buna bazen \"en uzun zincir\", \"kazanan zincir\" veya \"Bitcoin blok zinciri\" de denir).
+            Sadece gelen ödemeleri alacak ve o zincirde ödeme yapabileceksiniz.
+            Azınlık zincirlerindeki yani daha az ispatlanmış zincirlerdeki Bitcoinler için hiçbir garanti verilemez.
+        </p>
+        <p>
+            Geçmişte azınlık anahtarları daima çok hızlı bir şekilde anlamsız bir hale gelmişlerdir.
+            Eğer her şeye rağmen bir azınlık zincirini takip etmek istiyorsanız, sadece istediğiniz zinciri zorlayacak bir bitcoind uygulamasına bağlanmak için \"güvenli eş\" işlevini kullanmanız tavsiye edilir.
+            Şayet cüzdanınız ve güvenli eş arasındaki şebeke güvenilir değilse, bu bağlantıyı doğrulamak için bir VPN (sanal özel ağ) kullanın.
+        </p>
+    ]]>
+    </string>
 </resources>
